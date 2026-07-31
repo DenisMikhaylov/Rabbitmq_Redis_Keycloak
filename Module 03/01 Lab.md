@@ -1,371 +1,443 @@
-# Лабораторная работа: Развертывание и настройка Keycloak на Debian 12
+# Лабораторная работа: Развертывание и тестирование Keycloak на Debian 12
 
 ## Общая информация
 
-**Цель работы:** Ознакомление с технологией управления доступом Keycloak, получение практических навыков по установке, настройке и управлению пользователями и клиентами.
+**Цель работы:** Получение практических навыков по установке, настройке и тестированию Keycloak на сервере Debian 12 (без GUI).
 
 **Продолжительность:** 90 минут
 
-**ОС:** Debian 12
+**ОС:** Debian 12/13 (headless)
+
+**Стенд:** 3 виртуальные машины Debian 12 без GUI
 
 ---
 
-## Подготовка лабораторной среды
+## Схема лабораторного стенда
 
-### Слайд 1: Введение и цели лабораторной работы
-
-**Заголовок:** Лабораторная работа: Keycloak IAM
-
-**Содержание:**
-- **Цель:** Получение практических навыков по развертыванию и настройке Keycloak на Debian 12.
-- **Задачи:**
-    1. Установка Java и Keycloak.
-    2. Базовая конфигурация и запуск сервера.
-    3. Создание административной учетной записи.
-    4. Настройка первого Realm (области) и пользователей.
-    5. Регистрация клиентского приложения.
-    6. Тестирование аутентификации через OIDC.
-- **Результат:** Работающий экземпляр Keycloak с настроенным Realm, пользователями и клиентским приложением.
-
----
-
-### Слайд 2: Требования и подготовка системы
-
-**Заголовок:** Предварительная настройка Debian 12
-
-**Содержание:**
-- **Аппаратные требования:** 2 ГБ ОЗУ, 2 vCPU, 10 ГБ дискового пространства .
-- **Обновление системы:**
-    ```bash
-    sudo apt update && sudo apt upgrade -y
-    ```
-- **Установка Java:** Keycloak требует Java 17 или выше .
-    ```bash
-    sudo apt install openjdk-17-jdk-headless -y
-    java --version
-    ```
-- **Проверка:** Результат должен содержать `openjdk 17.x.x` или новее.
-- **Создание пользователя Keycloak** (для безопасности):
-    ```bash
-    sudo useradd -r -s /sbin/nologin keycloak
-    ```
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ЛАБОРАТОРНЫЙ СТЕНД                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+│  │   Сервер 1    │    │   Сервер 2   │    │   Сервер 3   │      │
+│  │  keycloak-01  │    │ keycloak-02  │    │ keycloak-03  │      │
+│  │  IP: .10      │    │  IP: .11     │    │  IP: .12     │      │
+│  │  Порт: 8080   │    │  Порт: 8080  │    │  Порт: 8080  │      │
+│  └──────────────┘    └──────────────┘    └──────────────┘      │
+│           │                    │                    │           │
+│           └────────────────────┼────────────────────┘           │
+│                                │                                │
+│                                ▼                                │
+│                 ┌─────────────────────────────┐                │
+│                 │      PostgreSQL (внешний)    │                │
+│                 │      192.168.1.10:5432      │                │
+│                 └─────────────────────────────┘                │
+│                                                                  │
+│  Все серверы: Debian 12/13, без GUI, 2-4 GB RAM                │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-### Слайд 3: Скачивание и установка Keycloak
+## Подготовка инфраструктуры
 
-**Заголовок:** Установка из официального репозитория
+### Задание 1.1: Первоначальная настройка серверов
 
-**Содержание:**
-- Перейдите в каталог `/opt`:
-    ```bash
-    cd /opt
-    ```
-- Скачайте актуальную версию Keycloak. Рекомендуется проверять последнюю версию на сайте keycloak.org .
-    ```bash
-    sudo wget https://github.com/keycloak/keycloak/releases/download/26.0.7/keycloak-26.0.7.tar.gz
-    ```
-- Распакуйте архив:
-    ```bash
-    sudo tar -xzf keycloak-26.0.7.tar.gz
-    sudo mv keycloak-26.0.7 keycloak
-    ```
-- Назначьте права пользователю `keycloak`:
-    ```bash
-    sudo chown -R keycloak:keycloak /opt/keycloak
-    ```
+Выполните на **каждом** из трёх серверов:
 
----
+```bash
+# Обновление системы
+sudo apt update && sudo apt upgrade -y
 
-### Слайд 4: Первоначальная настройка и создание администратора
+# Установка необходимых пакетов
+sudo apt install -y wget curl unzip gnupg2 ca-certificates
 
-**Заголовок:** Создание административной учетной записи
+# Настройка hostname
+# На первом сервере:
+sudo hostnamectl set-hostname keycloak-01
+# На втором сервере:
+sudo hostnamectl set-hostname keycloak-02
+# На третьем сервере:
+sudo hostnamectl set-hostname keycloak-03
 
-**Содержание:**
-- Создайте файл конфигурации `/opt/keycloak/conf/keycloak.conf` :
-    ```bash
-    sudo nano /opt/keycloak/conf/keycloak.conf
-    ```
-- Добавьте базовые настройки:
-    ```
-    hostname=localhost
-    http-port=8080
-    http-enabled=true
-    ```
-- Создайте администратора с помощью утилиты `kc.sh` :
-    ```bash
-    sudo -u keycloak /opt/keycloak/bin/kc.sh build
-    ```
-- Установите пароль администратора через переменные окружения :
-    ```bash
-    sudo -u keycloak KEYCLOAK_ADMIN=admin KEYCLOAK_ADMIN_PASSWORD=admin123 /opt/keycloak/bin/kc.sh build
-    ```
+# Проверка синхронизации времени
+sudo timedatectl set-timezone Europe/Moscow
+sudo apt install -y ntp
+sudo systemctl enable --now ntp
+sudo timedatectl status
+```
 
----
+### Задание 1.2: Настройка файла hosts
 
-### Слайд 5: Запуск Keycloak (Режим разработки)
+На **каждом** сервере отредактируйте файл `/etc/hosts`:
 
-**Заголовок:** Первый запуск в режиме разработки
+```bash
+sudo nano /etc/hosts
+```
 
-**Содержание:**
-- Запустите Keycloak в режиме разработки. Этот режим подходит для лабораторных работ, но не для продакшена (использует встроенную БД H2) .
-    ```bash
-    sudo -u keycloak /opt/keycloak/bin/kc.sh start-dev
-    ```
-- **Ожидаемый вывод:** Сервер запустится на порту 8080, в логах появится сообщение `Keycloak started`.
-- **Проверка:** Откройте браузер и перейдите по адресу `http://<IP-адрес_сервера>:8080`. Должна открыться страница приветствия Keycloak.
+Добавьте следующие строки (замените IP-адреса на реальные):
+
+```
+192.168.1.10   keycloak-01
+192.168.1.11   keycloak-02
+192.168.1.12   keycloak-03
+```
+
+Проверьте доступность узлов:
+
+```bash
+ping -c 3 keycloak-02
+ping -c 3 keycloak-03
+```
 
 ---
 
-### Слайд 6: Настройка systemd (для автоматического запуска)
+## Установка Java
 
-**Заголовок:** Создание сервиса для автозапуска
+### Задание 2.1: Установка OpenJDK 17
 
-**Содержание:**
-- Создайте файл службы systemd :
-    ```bash
-    sudo nano /etc/systemd/system/keycloak.service
-    ```
-- Добавьте следующее содержимое:
-    ```ini
-    [Unit]
-    Description=Keycloak Identity and Access Management
-    After=network.target
+На **каждом** сервере выполните:
 
-    [Service]
-    User=keycloak
-    Group=keycloak
-    Environment=KEYCLOAK_ADMIN=admin
-    Environment=KEYCLOAK_ADMIN_PASSWORD=admin123
-    ExecStart=/opt/keycloak/bin/kc.sh start
-    Restart=on-failure
-    RestartSec=10
+```bash
+# Установка OpenJDK 17
+sudo apt install -y openjdk-17-jdk-headless
 
-    [Install]
-    WantedBy=multi-user.target
-    ```
-- Активируйте и запустите сервис :
-    ```bash
-    sudo systemctl daemon-reload
-    sudo systemctl enable --now keycloak
-    sudo systemctl status keycloak
-    ```
+# Проверка версии
+java -version
+```
+
+**Ожидаемый результат:** `openjdk version "17.x.x"`
 
 ---
 
-### Слайд 7: Вход в консоль администратора
+## Установка и настройка PostgreSQL
 
-**Заголовок:** Первый вход в Admin Console
+### Задание 3.1: Установка PostgreSQL
 
-**Содержание:**
-- Откройте браузер и перейдите по адресу: `http://<IP-адрес>:8080`.
-- Нажмите на красную кнопку **"Administration Console"**.
-- Введите учетные данные администратора, созданные ранее :
-    - **Username:** `admin`
-    - **Password:** `admin123`
-- После входа вы окажетесь в `Master Realm`. Это системная область. Для лабораторных задач создадим отдельный Realm.
+На **первом сервере** (выбранном как база данных) выполните:
 
----
+```bash
+# Установка PostgreSQL
+sudo apt install -y postgresql postgresql-contrib
 
-### Слайд 8: Создание нового Realm
+# Запуск и включение автозапуска
+sudo systemctl enable --now postgresql
 
-**Заголовок:** Настройка изолированной области (Realm)
+# Проверка статуса
+sudo systemctl status postgresql
+```
 
-**Содержание:**
-- В левом верхнем углу наведите курсор на выпадающий список с названием `Master`.
-- Нажмите **"Create Realm"**.
-- Введите имя новой области: `LabRealm`.
-- Нажмите **"Create"**.
-- **Пояснение:** Realm — это изолированное пространство, которое позволяет разделять пользователей, клиентов и настройки для разных сред (Dev, Test, Prod) или разных заказчиков .
+### Задание 3.2: Создание базы данных и пользователя
 
----
+```bash
+# Переключение на пользователя postgres
+sudo -u postgres psql
 
-### Слайд 9: Настройка Realm Settings
+# Выполните следующие SQL-команды
+CREATE DATABASE keycloak;
+CREATE USER keycloak_user WITH ENCRYPTED PASSWORD 'KC_SecurePass2024!';
+GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak_user;
 
-**Заголовок:** Базовые параметры области
+# Выход из psql
+\q
+```
 
-**Содержание:**
-- В левом меню (для Realm `LabRealm`) перейдите в **"Realm Settings"**.
-- Вкладка **"Login"**:
-    - Установите галочку **"User registration"** (разрешить самостоятельную регистрацию).
-    - Установите галочку **"Forgot password"** (включить восстановление пароля).
-- Вкладка **"Tokens"**:
-    - Настройте время жизни токенов для экспериментов, например:
-        - `Access Token Lifespan`: `5 Minutes`
-        - `Refresh Token Lifespan`: `10 Minutes`
-- **Пояснение:** Уменьшенное время жизни токенов упрощает тестирование и отладку .
+### Задание 3.3: Настройка доступа к PostgreSQL
 
----
+Разрешите подключения с других узлов:
 
-### Слайд 10: Создание пользователей
+```bash
+sudo nano /etc/postgresql/15/main/postgresql.conf
+```
 
-**Заголовок:** Добавление пользователей в LabRealm
+Найдите и измените строку:
+```
+listen_addresses = '*'
+```
 
-**Содержание:**
-- Перейдите в раздел **"Users"**.
-- Нажмите **"Add user"**.
-- Заполните поля для первого пользователя:
-    - **Username:** `ivan.petrov`
-    - **Email:** `ivan@test.local`
-    - **First name:** `Ivan`
-    - **Last name:** `Petrov`
-    - **Email Verified:** Поставьте галочку (чтобы не ждать письма).
-- Нажмите **"Create"**.
-- После создания перейдите на вкладку **"Credentials"** пользователя и установите пароль:
-    - Введите пароль, например, `Test123!`.
-    - Уберите галочку **"Temporary"**, чтобы пароль не требовал смены при первом входе.
-- Нажмите **"Set Password"**.
-- **Практика:** Создайте второго пользователя `maria.smirnova` для тестирования.
+Настройте правила доступа:
 
----
+```bash
+sudo nano /etc/postgresql/15/main/pg_hba.conf
+```
 
-### Слайд 11: Управление группами
+Добавьте в конец файла (замените подсеть на вашу):
+```
+host    keycloak        keycloak_user   192.168.1.0/24          scram-sha-256
+```
 
-**Заголовок:** Создание иерархических групп
+Перезапустите PostgreSQL:
 
-**Содержание:**
-- Перейдите в раздел **"Groups"**.
-- Создайте группу **"Developers"**: **"Create group"** -> введите `Developers` -> **"Create"**.
-- Создайте группу **"Managers"**.
-- Добавьте пользователей в группы:
-    - Зайдите в группу `Developers` -> вкладка **"Members"** -> **"Add members"** -> выберите `ivan.petrov`.
-    - Зайдите в группу `Managers` -> вкладка **"Members"** -> **"Add members"** -> выберите `maria.smirnova`.
-- **Пояснение:** Группы могут иметь вложенность и упрощают массовое назначение ролей.
+```bash
+sudo systemctl restart postgresql
+
+# Проверка доступности с других узлов
+sudo netstat -tulpn | grep 5432
+```
 
 ---
 
-### Слайд 12: Создание клиентского приложения
+## Установка Keycloak
 
-**Заголовок:** Регистрация OIDC клиента
+### Задание 4.1: Скачивание и установка
 
-**Содержание:**
-- Перейдите в раздел **"Clients"**.
-- Нажмите **"Create client"**.
-- **Client ID:** `test-app`
-- **Client Protocol:** `OpenID Connect`
-- Нажмите **"Next"**.
-- Настройки (вкладка **"Capability config"**):
-    - **Client authentication:** `Off` (для Public клиента — SPA).
-    - **Standard flow:** `On` (код авторизации).
-- Нажмите **"Next"**.
-- Вкладка **"Login settings"**:
-    - **Valid redirect URIs:** `http://localhost:3000/*` (для тестов можно указать `http://localhost:8080/*`, но безопаснее оставить `*`).
-- Нажмите **"Save"**.
-- **Пояснение:** Клиент — это приложение, которое будет использовать Keycloak для аутентификации .
+На **каждом** сервере выполните:
 
----
+```bash
+# Создание пользователя
+sudo useradd -r -s /bin/false keycloak
 
-### Слайд 13: Настройка Client Scopes
+# Создание каталогов
+sudo mkdir -p /opt/keycloak
+sudo mkdir -p /var/log/keycloak
+sudo mkdir -p /etc/keycloak
 
-**Заголовок:** Запрос информации о пользователе
+# Назначение прав
+sudo chown -R keycloak:keycloak /opt/keycloak
+sudo chown -R keycloak:keycloak /var/log/keycloak
 
-**Содержание:**
-- В карточке созданного клиента `test-app` перейдите на вкладку **"Client scopes"**.
-- Нажмите **"Add predefined client scopes"**.
-- Выберите и добавьте:
-    - `email` (доступ к email пользователя).
-    - `profile` (доступ к имени, фамилии, аватарке).
-- **Пояснение:** Client Scopes определяют, какие данные о пользователе приложение может запрашивать у Keycloak . `openid` добавляется автоматически.
+# Скачивание Keycloak
+cd /tmp
+sudo wget https://github.com/keycloak/keycloak/releases/download/24.0.1/keycloak-24.0.1.tar.gz
 
----
+# Распаковка
+sudo tar -xzf keycloak-24.0.1.tar.gz -C /opt/keycloak --strip-components=1
 
-### Слайд 14: Назначение ролей пользователям
+# Настройка прав
+sudo chown -R keycloak:keycloak /opt/keycloak
+sudo chmod +x /opt/keycloak/bin/kc.sh
+```
 
-**Заголовок:** Управление доступом через роли
+### Задание 4.2: Создание конфигурационного файла
 
-**Содержание:**
-- Перейдите в раздел **"Realm Roles"**.
-- Создайте роль **`user`**: **"Create role"** -> введите `user` -> **"Create"**.
-- Создайте роль **`admin`**.
-- Назначьте роли пользователям:
-    - Откройте карточку пользователя `ivan.petrov` -> вкладка **"Role Mappings"**.
-    - В разделе **"Realm Roles"** нажмите **"Assign role"**.
-    - Выберите роль `user` -> **"Assign"**.
-- Назначьте пользователю `maria.smirnova` роль `admin`.
-- **Пояснение:** Роли являются основным механизмом авторизации. Приложение может проверять наличие ролей в JWT-токене для предоставления доступа .
+На **каждом** сервере создайте файл конфигурации:
 
----
+```bash
+sudo nano /opt/keycloak/conf/keycloak.conf
+```
 
-### Слайд 15: Тестирование через OIDC (Авторизационный код)
+Содержимое (настройте IP-адрес сервера БД):
 
-**Заголовок:** Проверка аутентификации в браузере
+```properties
+# База данных
+db=postgres
+db-url=jdbc:postgresql://192.168.1.10:5432/keycloak
+db-username=keycloak_user
+db-password=KC_SecurePass2024!
 
-**Содержание:**
-- Откройте новый браузер в режиме "Инкогнито".
-- Перейдите по URL авторизации Keycloak (скопируйте URL из админки клиента или сформируйте вручную):
-    ```
-    http://localhost:8080/realms/LabRealm/protocol/openid-connect/auth
-    ?client_id=test-app
-    &redirect_uri=http://localhost:3000
-    &response_type=code
-    &scope=openid%20profile%20email
-    ```
-- Вы будете перенаправлены на страницу входа Keycloak.
-- Введите учетные данные пользователя `ivan.petrov` (пароль `Test123!`).
-- После успешного входа Keycloak перенаправит вас на `http://localhost:3000` с параметром `?code=...` в URL.
-- **Пояснение:** Если `redirect_uri` не совпадает с настроенным в клиенте, вы получите ошибку `Invalid redirect_uri` .
+# HTTP настройки
+http-host=0.0.0.0
+http-port=8080
+https-port=8443
+hostname-strict=false
+hostname-strict-https=false
+
+# Логирование
+log-level=INFO
+log-file=/var/log/keycloak/keycloak.log
+```
+
+### Задание 4.3: Создание администратора
+
+```bash
+sudo -u keycloak KEYCLOAK_ADMIN=admin KEYCLOAK_ADMIN_PASSWORD=admin123 /opt/keycloak/bin/kc.sh build
+```
 
 ---
 
-### Слайд 16: Тестирование через OIDC (Client Credentials Flow)
+## Запуск и тестирование
 
-**Заголовок:** Машинный доступ к API (Server-to-Server)
+### Задание 5.1: Запуск в режиме разработки
 
-**Содержание:**
-- Создайте новый клиент `backend-api` с типом **Confidential**.
-- Включите **"Service Accounts Enabled"**.
-- После создания откройте вкладку **"Credentials"** скопируйте **Client Secret**.
-- Получите токен с помощью команды `curl` (замените `<SECRET>` на ваш Client Secret) :
-    ```bash
-    curl -X POST http://localhost:8080/realms/LabRealm/protocol/openid-connect/token \
-      -d "grant_type=client_credentials" \
-      -d "client_id=backend-api" \
-      -d "client_secret=<SECRET>"
-    ```
-- **Результат:** Вы получите JSON-ответ с `access_token`. Этот токен можно использовать для аутентификации сервисов при общении друг с другом.
-- **Пояснение:** Этот поток не требует участия пользователя и подходит для микросервисов.
+```bash
+sudo -u keycloak /opt/keycloak/bin/kc.sh start-dev
+```
 
----
+**Проверка:** Откройте браузер и перейдите на `http://<IP-адрес_сервера>:8080`
 
-### Слайд 17: Включение двухфакторной аутентификации (2FA)
+### Задание 5.2: Создание systemd сервиса
 
-**Заголовок:** Настройка OTP для пользователей
+```bash
+sudo nano /etc/systemd/system/keycloak.service
+```
 
-**Содержание:**
-- Перейдите в **"Realm Settings"** -> вкладка **"Authentication"** -> вкладка **"Flows"**.
-- Найдите поток **"Browser"** и нажмите **"Actions"** -> **"Duplicate"**, назовите его `Browser with OTP`.
-- В скопированном потоке найдите строку **"OTP Form"**.
-- Измените ее состояние с `DISABLED` на **`REQUIRED`**.
-- Вернитесь в настройки Realm и выберите **"Browser with OTP"** как **"Browser Flow"**.
-- При следующем входе пользователь будет обязан настроить Google Authenticator и вводить OTP-код .
+Содержимое:
 
----
+```ini
+[Unit]
+Description=Keycloak Identity and Access Management
+After=network.target postgresql.service
 
-### Слайд 18: Включение защиты от брутфорса
+[Service]
+User=keycloak
+Group=keycloak
+Environment=KEYCLOAK_ADMIN=admin
+Environment=KEYCLOAK_ADMIN_PASSWORD=admin123
+ExecStart=/opt/keycloak/bin/kc.sh start
+Restart=on-failure
+RestartSec=10
 
-**Заголовок:** Защита от подбора паролей
+[Install]
+WantedBy=multi-user.target
+```
 
-**Содержание:**
-- Перейдите в **"Realm Settings"** -> вкладка **"Security Defenses"**.
-- Найдите раздел **"Brute Force Detection"**.
-- Установите переключатель в положение **"On"**.
-- Настройте параметры:
-    - **Max Login Failures:** `5` (количество неудачных попыток до блокировки).
-    - **Failure Reset Time:** `300` (через сколько секунд обнулить счетчик).
-    - **Minimum Quick Login Wait Time:** `60` (минимальная задержка при быстрых попытках входа).
-- **Пояснение:** Эта функция защищает от автоматического подбора паролей, блокируя учетную запись или IP-адрес при превышении лимита .
+Запустите сервис:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now keycloak
+sudo systemctl status keycloak
+```
 
 ---
 
-### Слайд 19: Проверка логов событий
+## Тестирование Keycloak
 
-**Заголовок:** Аудит действий пользователей
+### Задание 6.1: Вход в консоль администратора
 
-**Содержание:**
-- Перейдите в раздел **"Events"**.
-- Вкладка **"Event config"**:
-    - Включите сохранение событий: **"Save events"** -> `On`.
-    - **"Events to save"**: Выберите `Login`, `Logout`, `Register`, `Login error`.
-- Вкладка **"Events"** отображает реальные события. Попробуйте залогиниться с неправильным паролем, чтобы увидеть событие `LOGIN_ERROR`.
-- **Пояснение:** Аудит необходим для мониторинга безопасности и выявления подозрительной активности.
+1. Откройте браузер и перейдите на `http://<IP-адрес>:8080`
+2. Нажмите **"Administration Console"**
+3. Введите учетные данные: `admin` / `admin123`
 
+### Задание 6.2: Создание Realm
+
+1. Наведите на выпадающий список `Master` в левом верхнем углу
+2. Нажмите **"Create Realm"**
+3. Введите имя: `TestRealm`
+4. Нажмите **"Create"**
+
+### Задание 6.3: Создание пользователя
+
+1. В левом меню перейдите в **"Users"**
+2. Нажмите **"Add user"**
+3. Заполните поля:
+   - **Username:** `testuser`
+   - **Email:** `test@test.local`
+   - **First name:** `Test`
+   - **Last name:** `User`
+   - **Email Verified:** поставьте галочку
+4. Нажмите **"Create"**
+5. Перейдите на вкладку **"Credentials"**
+6. Установите пароль: `Test123!`
+7. Уберите галочку **"Temporary"**
+8. Нажмите **"Set Password"**
+
+### Задание 6.4: Создание клиента
+
+1. Перейдите в раздел **"Clients"**
+2. Нажмите **"Create client"**
+3. **Client ID:** `test-app`
+4. **Client Protocol:** `OpenID Connect`
+5. Нажмите **"Next"**
+6. **Client authentication:** `Off`
+7. **Standard flow:** `On`
+8. Нажмите **"Next"**
+9. **Valid redirect URIs:** `http://localhost:8080/*`
+10. Нажмите **"Save"**
+
+### Задание 6.5: Тестирование аутентификации
+
+Сформируйте URL для авторизации:
+
+```
+http://<IP-адрес>:8080/realms/TestRealm/protocol/openid-connect/auth
+?client_id=test-app
+&redirect_uri=http://localhost:8080
+&response_type=code
+&scope=openid%20profile%20email
+```
+
+Откройте этот URL в браузере, введите учетные данные `testuser` / `Test123!` и убедитесь, что происходит перенаправление.
+
+### Задание 6.6: Получение токена через CLI
+
+На сервере выполните:
+
+```bash
+curl -X POST http://localhost:8080/realms/TestRealm/protocol/openid-connect/token \
+  -d "grant_type=password" \
+  -d "client_id=test-app" \
+  -d "username=testuser" \
+  -d "password=Test123!"
+```
+
+**Ожидаемый результат:** JSON-ответ с `access_token`
+
+---
+
+## Дополнительные задания
+
+### Задание 7.1: Установка Keycloak на второй сервер
+
+Повторите задания 4.1, 4.2, 4.3, 5.2 на втором и третьем серверах.
+
+### Задание 7.2: Настройка кластеризации
+
+На **каждом** сервере добавьте в `/opt/keycloak/conf/keycloak.conf`:
+
+```properties
+cache=ispn
+cache-stack=tcp
+```
+
+### Задание 7.3: Включение двухфакторной аутентификации
+
+1. Перейдите в **Realm Settings** → **Authentication** → **Flows**
+2. Найдите поток **"Browser"** → **"Actions"** → **"Duplicate"**
+3. Назовите: `Browser with OTP`
+4. В скопированном потоке найдите **"OTP Form"**
+5. Измените состояние с `DISABLED` на **`REQUIRED`**
+6. Выберите **"Browser with OTP"** как **"Browser Flow"**
+
+### Задание 7.4: Включение защиты от брутфорса
+
+1. Перейдите в **Realm Settings** → **"Security Defenses"**
+2. Найдите **"Brute Force Detection"** → включите `On`
+3. Настройте:
+   - **Max Login Failures:** `5`
+   - **Failure Reset Time:** `300`
+   - **Minimum Quick Login Wait Time:** `60`
+
+---
+
+## Проверка работоспособности
+
+### Чек-лист для самопроверки
+
+| № | Действие | Статус |
+|---|----------|--------|
+| 1 | Java 17 установлен | ✅ |
+| 2 | PostgreSQL запущен | ✅ |
+| 3 | База данных и пользователь созданы | ✅ |
+| 4 | Keycloak установлен | ✅ |
+| 5 | Keycloak запущен через systemd | ✅ |
+| 6 | Admin Console доступна | ✅ |
+| 7 | Realm создан | ✅ |
+| 8 | Пользователь создан | ✅ |
+| 9 | Клиент создан | ✅ |
+| 10 | Токен получен через curl | ✅ |
+| 11 | Кластер работает (если настраивался) | ✅ |
+| 12 | 2FA работает (если настраивалась) | ✅ |
+
+### Полезные команды для проверки
+
+```bash
+# Проверка статуса Keycloak
+sudo systemctl status keycloak
+
+# Просмотр логов
+sudo journalctl -u keycloak -f
+tail -f /var/log/keycloak/keycloak.log
+
+# Проверка портов
+sudo netstat -tulpn | grep 8080
+
+# Проверка подключения к БД
+psql -h 192.168.1.10 -U keycloak_user -d keycloak -W
+```
+
+
+---
+
+**Конец лабораторной работы.**
