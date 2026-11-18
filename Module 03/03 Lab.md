@@ -249,10 +249,24 @@ sudo systemctl status keycloak
 
 ```bash
 # Добавление репозитория RabbitMQ
-curl -fsSL https://github.com/rabbitmq/signing-keys/releases/download/2.0/rabbitmq-release-signing-key.asc | sudo apt-key add -
+
+apt-get install -y curl gnupg apt-transport-https
+
+curl -1sLf "https://keys.openpgp.org/vks/v1/by-fingerprint/0A9AF2115F4687BD29803A206B73A36E6026DFCA" | sudo gpg --dearmor | sudo tee /usr/share/keyrings/com.rabbitmq.team.gpg > /dev/null
 sudo apt install -y apt-transport-https
 
-echo "deb https://dl.bintray.com/rabbitmq/debian buster main" | sudo tee /etc/apt/sources.list.d/rabbitmq.list
+OS_CODENAME=$(lsb_release -sc)
+OS_ID=$(lsb_release -is | tr '[:upper:]' '[:lower:]')
+
+sudo tee /etc/apt/sources.list.d/rabbitmq.list <<EOF
+## Modern Erlang/OTP releases
+deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb1.rabbitmq.com/rabbitmq-erlang/${OS_ID} ${OS_CODENAME} main
+deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb2.rabbitmq.com/rabbitmq-erlang/${OS_ID} ${OS_CODENAME} main
+
+## Latest RabbitMQ releases
+deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb1.rabbitmq.com/rabbitmq-server/${OS_ID} ${OS_CODENAME} main
+deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb2.rabbitmq.com/rabbitmq-server/${OS_ID} ${OS_CODENAME} main
+EOF
 
 # Обновление и установка
 sudo apt update
