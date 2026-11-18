@@ -248,33 +248,55 @@ sudo systemctl status keycloak
 На **каждом** сервере RabbitMQ (rabbitmq-01 и rabbitmq-02) выполните:
 
 ```bash
-# Добавление репозитория RabbitMQ
+#!/bin/sh
 
-apt-get install -y curl gnupg apt-transport-https
+sudo apt-get install curl gnupg apt-transport-https -y
 
+## Team RabbitMQ's signing key
 curl -1sLf "https://keys.openpgp.org/vks/v1/by-fingerprint/0A9AF2115F4687BD29803A206B73A36E6026DFCA" | sudo gpg --dearmor | sudo tee /usr/share/keyrings/com.rabbitmq.team.gpg > /dev/null
-sudo apt install -y apt-transport-https
 
-OS_CODENAME=$(lsb_release -sc)
-OS_ID=$(lsb_release -is | tr '[:upper:]' '[:lower:]')
-
+## Add apt repositories maintained by Team RabbitMQ
 sudo tee /etc/apt/sources.list.d/rabbitmq.list <<EOF
 ## Modern Erlang/OTP releases
-deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb1.rabbitmq.com/rabbitmq-erlang/${OS_ID} ${OS_CODENAME} main
-deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb2.rabbitmq.com/rabbitmq-erlang/${OS_ID} ${OS_CODENAME} main
+##
+deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb1.rabbitmq.com/rabbitmq-erlang/debian/bookworm bookworm main
+deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb2.rabbitmq.com/rabbitmq-erlang/debian/bookworm bookworm main
 
 ## Latest RabbitMQ releases
-deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb1.rabbitmq.com/rabbitmq-server/${OS_ID} ${OS_CODENAME} main
-deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb2.rabbitmq.com/rabbitmq-server/${OS_ID} ${OS_CODENAME} main
+##
+deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb1.rabbitmq.com/rabbitmq-server/debian/bookworm bookworm main
+deb [arch=amd64 signed-by=/usr/share/keyrings/com.rabbitmq.team.gpg] https://deb2.rabbitmq.com/rabbitmq-server/debian/bookworm bookworm main
 EOF
 
-# Обновление и установка
-sudo apt update
-sudo apt install -y rabbitmq-server
+## Update package indices
+sudo apt-get update -y
 
-# Запуск и включение автозапуска
-sudo systemctl enable --now rabbitmq-server
-sudo systemctl status rabbitmq-server
+## Install Erlang packages
+##
+## For versions not compatible with the latest available Erlang series, which is the case
+## for 3.13.x, apt must be instructed to install specifically Erlang 26.
+## Alternatively this can be done via version pinning, documented further in this guide.
+supported_erlang_version="1:26.2.5.13-1"
+sudo apt-get install -y erlang-base=$supported_erlang_version \
+                        erlang-asn1=$supported_erlang_version \
+                        erlang-crypto=$supported_erlang_version \
+                        erlang-eldap=$supported_erlang_version \
+                        erlang-ftp=$supported_erlang_version \
+                        erlang-inets=$supported_erlang_version \
+                        erlang-mnesia=$supported_erlang_version \
+                        erlang-os-mon=$supported_erlang_version \
+                        erlang-parsetools=$supported_erlang_version \
+                        erlang-public-key=$supported_erlang_version \
+                        erlang-runtime-tools=$supported_erlang_version \
+                        erlang-snmp=$supported_erlang_version \
+                        erlang-ssl=$supported_erlang_version \
+                        erlang-syntax-tools=$supported_erlang_version \
+                        erlang-tftp=$supported_erlang_version \
+                        erlang-tools=$supported_erlang_version \
+                        erlang-xmerl=$supported_erlang_version
+
+## Install rabbitmq-server and its dependencies
+sudo apt-get install rabbitmq-server -y --fix-missing
 ```
 
 ### Задание 3.2: Включение плагина OAuth 2.0
